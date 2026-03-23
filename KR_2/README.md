@@ -223,3 +223,103 @@ def get_profile(session_token: Optional[str] = Cookie(None)):
 ![1774290335433](image/README/1774290335433.png)
 
 ## Задание 5.3
+
+# main.py
+
+```python
+SESSION_LIFETIME_SECONDS = 300
+SESSION_REFRESH_FROM_SECONDS = 180
+
+def _build_session_token(user_id: str, last_activity: int) -> str:
+    payload = f"{user_id}.{last_activity}"
+    signature = signer.get_signature(payload).decode("utf-8")
+    return f"{payload}.{signature}"
+
+@app.get("/profile", summary="Профиль с безопасной сессией")
+def get_profile(response: Response, session_token: str | None = Cookie(default=None)):
+    if not session_token:
+        raise HTTPException(status_code=401, detail={"message": "Session expired"})
+
+    user_id, last_activity = _validate_session_token(session_token)
+    now_ts = int(time.time())
+    diff = now_ts - last_activity
+
+    if diff < 0:
+        raise HTTPException(status_code=401, detail={"message": "Invalid session"})
+    if diff >= SESSION_LIFETIME_SECONDS:
+        raise HTTPException(status_code=401, detail={"message": "Session expired"})
+
+    if SESSION_REFRESH_FROM_SECONDS <= diff < SESSION_LIFETIME_SECONDS:
+        refreshed = _build_session_token(user_id, now_ts)
+        response.set_cookie(
+            key="session_token",
+            value=refreshed,
+            httponly=True,
+            secure=False,
+            max_age=SESSION_LIFETIME_SECONDS,
+        )
+```
+
+# Результат
+
+- В `session_token` используется формат `<user_id>.<timestamp>.<signature>`.
+- При активности от 3 до 5 минут токен автоматически обновляется.
+- Если прошло 5+ минут — возвращается `401` с `{"message": "Session expired"}`.
+- При подделке cookie (id/время/подпись) — `401` с `{"message": "Invalid session"}`.
+
+## Задание 5.4
+
+# main.py
+
+```python
+@app.get("/headers", summary="Чтение заголовков запроса")
+def read_headers(headers: CommonHeaders = Depends(get_common_headers)):
+    return {"User-Agent": headers.user_agent, "Accept-Language": headers.accept_language}
+```
+
+# Результат
+
+- Реализован `GET /headers`.
+- Извлекаются обязательные заголовки `User-Agent` и `Accept-Language`.
+- Если заголовки отсутствуют — возвращается ошибка `400`.
+- Добавлена проверка формата `Accept-Language`.
+
+## Задание 5.5
+
+# models.py
+
+```python
+class CommonHeaders(BaseModel):
+    user_agent: str = Field(min_length=1)
+    accept_language: str = Field(min_length=1)
+
+    @field_validator("accept_language")
+    @classmethod
+    def validate_accept_language(cls, value: str) -> str:
+        pattern = r"^[a-z]{2}(?:-[A-Z]{2})?(?:,\s*[a-z]{2}(?:-[A-Z]{2})?(?:;q=(?:0(?:\.\d{1,3})?|1(?:\.0{1,3})?))?)*$"
+        if not re.fullmatch(pattern, value):
+            raise ValueError("Invalid Accept-Language format")
+        return value
+```
+
+# main.py
+
+```python
+@app.get("/info", summary="Заголовки + дополнительная информация")
+def read_info(response: Response, headers: CommonHeaders = Depends(get_common_headers)):
+    response.headers["X-Server-Time"] = datetime.now().isoformat(timespec="seconds")
+    return {
+        "message": "Добро пожаловать! Ваши заголовки успешно обработаны.",
+        "headers": {
+            "User-Agent": headers.user_agent,
+            "Accept-Language": headers.accept_language,
+        },
+    }
+```
+
+# Результат
+
+- Создана переиспользуемая модель `CommonHeaders` (принцип DRY).
+- Модель подключена сразу в двух маршрутах: `/headers` и `/info`.
+- В `/info` добавлен HTTP-заголовок ответа `X-Server-Time`.
+- Ошибки валидации формата `Accept-Language` обрабатываются в обоих маршрутах.
