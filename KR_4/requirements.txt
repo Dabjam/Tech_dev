@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+pytest
+pytest-asyncio
+httpx
+Faker
+email-validator
